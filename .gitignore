@@ -1,0 +1,4 @@
+# Specify filepatterns you want git to ignore.
+
+#local config with secrets
+config.h
