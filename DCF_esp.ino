@@ -6,12 +6,12 @@
 #include "dcf77.h"
 #include "config.h"
 
-ESP8266WiFiMulti wifiMulti;      // Create an instance of the ESP8266WiFiMulti class, called 'wifiMulti'
+ESP8266WiFiMulti wifiMulti;      
 
-WiFiUDP UDP;                     // Create an instance of the WiFiUDP class to send and receive
+WiFiUDP UDP;                     
 
-IPAddress timeServerIP;          // time.nist.gov NTP server address
-const char* NTPServerName = "0.ch.pool.ntp.org";
+IPAddress timeServerIP;          
+const char* NTPServerName = NTP_SERVER;
 
 const int NTP_PACKET_SIZE = 48;  // NTP time stamp is in the first 48 bytes of the message
 
@@ -26,9 +26,6 @@ time_t timeU;
 unsigned long prevActualTime = 0;
 
 void setup() {
-  Serial.begin(115200);          // Start the Serial communication to send messages to the computer
-  delay(10);
-  Serial.println("\r\n");
   pinMode(D7, OUTPUT);
   digitalWrite(D7, HIGH);
 
@@ -37,14 +34,9 @@ void setup() {
   startUDP();
 
   if(!WiFi.hostByName(NTPServerName, timeServerIP)) { // Get the IP address of the NTP server
-    //Serial.println("DNS lookup failed. Rebooting.");
-    //Serial.flush();
     ESP.reset();
   }
-  //Serial.print("Time server IP:\t");
-  //Serial.println(timeServerIP);
-  
-  //Serial.println("\r\nSending NTP request ...");
+
   sendNTPpacket(timeServerIP);  
 
   ArduinoOTA.setHostname("horloge_murale");
@@ -58,32 +50,14 @@ void setup() {
     }
 
     // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
-    //Serial.println("Start updating " + type);
   });
   ArduinoOTA.onEnd([]() {
-    //Serial.println("\nEnd");
   });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    //Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
   });
   ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
-    /*if (error == OTA_AUTH_ERROR) {
-      Serial.println("Auth Failed");
-    } else if (error == OTA_BEGIN_ERROR) {
-      Serial.println("Begin Failed");
-    } else if (error == OTA_CONNECT_ERROR) {
-      Serial.println("Connect Failed");
-    } else if (error == OTA_RECEIVE_ERROR) {
-      Serial.println("Receive Failed");
-    } else if (error == OTA_END_ERROR) {
-      Serial.println("End Failed");
-    }*/
   });
   ArduinoOTA.begin();
-  /*Serial.println("Ready");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());*/
 }
 
 void loop() {
@@ -93,7 +67,6 @@ void loop() {
 
   if (currentMillis - prevNTP > intervalNTP) { // If a minute has passed since last NTP request
     prevNTP = currentMillis;
-    Serial.println("\r\nSending NTP request ...");
     sendNTPpacket(timeServerIP);               // Send an NTP request
   }
 
@@ -103,27 +76,16 @@ void loop() {
     timeUNIX = time;
     timeU = time;
     struct tm *ptm = localtime(&timeU);
-    /*Serial.print("day : ");
-    Serial.println(ptm->tm_mday);
-    Serial.print("month : ");
-    Serial.println(ptm->tm_mon);
-    Serial.print("year : ");
-    Serial.println(ptm->tm_year);
-    Serial.print("NTP response:\t");
-    Serial.println(timeUNIX);*/
     lastNTPResponse = currentMillis;
     packetGen(getMinutes(timeUNIX),getHours(timeUNIX), ptm->tm_mday,(ptm->tm_mon+1),(ptm->tm_year%100));
   } 
   else if ((currentMillis - lastNTPResponse) > 3600000) {
-    //Serial.println("More than 1 hour since last NTP response. Rebooting.");
-    //Serial.flush();
     ESP.reset();
   }
 
   uint32_t actualTime = timeUNIX + (currentMillis - lastNTPResponse)/1000;
   if (actualTime != prevActualTime && timeUNIX != 0) { // If a second has passed since last print
     prevActualTime = actualTime;
-    //Serial.printf("\n\rUTC time:\t%d:%d:%d   ", getHours(actualTime), getMinutes(actualTime), getSeconds(actualTime));
     
     if(getPacket(getSeconds(actualTime))==1 && getSeconds(actualTime)!=59){
       digitalWrite(D7,LOW);
@@ -136,40 +98,31 @@ void loop() {
       digitalWrite(D7,HIGH);
     }
     else{
-      /*digitalWrite(D7,LOW);
-      delay(1000);
-      digitalWrite(D7,HIGH);*/
+      // Do nothing for 1 impulse (59s)
     }
   }  
 }
 
-
-
-
 void startWiFi() { // Try to connect to some given access points. Then wait for a connection
   wifiMulti.addAP(AP1, AP1_PWD);   // add Wi-Fi networks you want to connect to
-  //wifiMulti.addAP("ssid_from_AP_2", "your_password_for_AP_2");
-  //wifiMulti.addAP("ssid_from_AP_3", "your_password_for_AP_3");
 
-  Serial.println("Connecting");
   while (wifiMulti.run() != WL_CONNECTED) {  // Wait for the Wi-Fi to connect
     delay(250);
-    Serial.print('.');
   }
-  /*Serial.println("\r\n");
-  Serial.print("Connected to ");
-  Serial.println(WiFi.SSID());             // Tell us what network we're connected to
-  Serial.print("IP address:\t");
-  Serial.print(WiFi.localIP());            // Send the IP address of the ESP8266 to the computer
-  Serial.println("\r\n");*/
 }
 
 void startUDP() {
-  //Serial.println("Starting UDP");
   UDP.begin(123);                          // Start listening for UDP messages on port 123
-  /*Serial.print("Local port:\t");
-  Serial.println(UDP.localPort());
-  Serial.println();*/
+}
+
+void sendNTPpacket(IPAddress& address) {
+  memset(NTPBuffer, 0, NTP_PACKET_SIZE);  // set all bytes in the buffer to 0
+  // Initialize values needed to form NTP request
+  NTPBuffer[0] = 0b11100011;   // LI, Version, Mode
+  // send a packet requesting a timestamp:
+  UDP.beginPacket(address, 123); // NTP requests are to port 123
+  UDP.write(NTPBuffer, NTP_PACKET_SIZE);
+  UDP.endPacket();
 }
 
 uint32_t getTime() {
@@ -183,18 +136,8 @@ uint32_t getTime() {
   // Unix time starts on Jan 1 1970. That's 2208988800 seconds in NTP time:
   const uint32_t seventyYears = 2208988800UL;
   // subtract seventy years:
-  uint32_t UNIXTime = NTPTime - seventyYears + 3600;
+  uint32_t UNIXTime = NTPTime - seventyYears + (3600*TIME_ZONE);
   return UNIXTime;
-}
-
-void sendNTPpacket(IPAddress& address) {
-  memset(NTPBuffer, 0, NTP_PACKET_SIZE);  // set all bytes in the buffer to 0
-  // Initialize values needed to form NTP request
-  NTPBuffer[0] = 0b11100011;   // LI, Version, Mode
-  // send a packet requesting a timestamp:
-  UDP.beginPacket(address, 123); // NTP requests are to port 123
-  UDP.write(NTPBuffer, NTP_PACKET_SIZE);
-  UDP.endPacket();
 }
 
 inline int getSeconds(uint32_t UNIXTime) {
